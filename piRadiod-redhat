@@ -1,0 +1,81 @@
+#!/bin/bash
+#
+# piRadiod        Startup script for the piRadio daemon
+#
+# chkconfig: - 85 15
+# description: piRadio is used to read web radio, based on raspberryPi GPIO.
+# processname: piRadiod
+# config: /etc/sysconfig/piRadio
+# pidfile: /var/run/piRadiod/piRadiod.pid
+#
+### BEGIN INIT INFO
+# Provides: piRadiod
+# Required-Start: $local_fs $network
+# Required-Stop: $local_fs $network
+# Default-Start:
+# Default-Stop:
+# Short-Description: start and stop the piRadio daemon
+# Description: Gearman is a distributed job syste.
+### END INIT INFO
+
+# Source function library.
+#. /etc/rc.d/init.d/functions
+. /lib/lsb/init-functions
+
+if [ -f /etc/piRadio/piRadio.conf ]; then
+        . /etc/piRadio/piRadio.conf
+fi
+
+[ -z "${PIDFILE}" ] && pidfile="/var/run/piRadiod.pid"
+[ -z "${LOCKFILE}" ] && lockfile="/var/lock/subsys/piRadiod"
+
+piRadiod=/usr/bin/piRadio
+prog=piRadiod
+
+RETVAL=0
+
+start() {
+        echo -n $"Starting $prog: "
+        daemon --pidfile=$pidfile --user=root $piRadiod -f $radioListFile -d
+        RETVAL=$?
+        echo
+        [ $RETVAL = 0 ] && (touch $lockfile; pgrep -f $piRadiod > $pidfile)
+        return $RETVAL
+}
+
+stop() {
+        echo -n $"Stopping $prog: "
+        killproc -p $pidfile $piRadiod
+        RETVAL=$?
+        echo
+        [ $RETVAL = 0 ] && rm -f $lockfile $pidfile
+}
+
+# See how we were called.
+case "$1" in
+  start)
+        start
+        ;;
+  stop)
+        stop
+        ;;
+  status)
+        status -p $pidfile $piRadiod
+        RETVAL=$?
+        ;;
+  restart|reload)
+        stop
+        start
+        ;;
+  condrestart|try-restart)
+        if status -p $pidfile $piRadiod >&/dev/null; then
+                stop
+                start
+        fi
+        ;;
+  *)
+        echo $"Usage: $prog {start|stop|restart|reload|condrestart|status|help}"
+        RETVAL=3
+esac
+
+exit $RETVAL
