@@ -1,35 +1,3 @@
-/*
- * isr.c:
- *	Wait for Interrupt test program - ISR method
- *
- *	How to test:
- *	  Use the SoC's pull-up and pull down resistors that are avalable
- *	on input pins. So compile & run this program (via sudo), then
- *	in another terminal:
- *		gpio mode 0 up
- *		gpio mode 0 down
- *	at which point it should trigger an interrupt. Toggle the pin
- *	up/down to generate more interrupts to test.
- *
- * Copyright (c) 2013 Gordon Henderson.
- ***********************************************************************
- * This file is part of wiringPi:
- *	https://projects.drogon.net/raspberry-pi/wiringpi/
- *
- *    wiringPi is free software: you can redistribute it and/or modify
- *    it under the terms of the GNU Lesser General Public License as published by
- *    the Free Software Foundation, either version 3 of the License, or
- *    (at your option) any later version.
- *
- *    wiringPi is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *    GNU Lesser General Public License for more details.
- *
- *    You should have received a copy of the GNU Lesser General Public License
- *    along with wiringPi.  If not, see <http://www.gnu.org/licenses/>.
- ***********************************************************************
- */
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -47,6 +15,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <syslog.h>
+#include <stdarg.h>     /* va_list, va_start, va_arg, va_end */
 
 
 // What GPIO input are we using?
@@ -54,13 +24,10 @@
 
 #define	BUTTON_PIN	0
 
-// globalCounter:
-//	Global variable to count interrupts
-//	Should be declared volatile to make sure the compiler doesn't cache it.
-
+int verbose = 0;
+int runAsDaemon = 0;
 int numberOfRadio = 0;
 #define MAX_RADIO 100
-//char * radioList[] = { "http://stream.funradio.sk:8000/fun128.mp3.m3u",  "http://icecast.rtl.fr/rtl-1-48-72.aac?type=.flv"};
 char * radioList[MAX_RADIO];
 int segment_id; //Shared Memory ID
 int segment_id2; //Shared Memory ID
@@ -69,22 +36,26 @@ bool  * mem_changeRadio; //Shared Memory Pointer
 bool  * mem_turnOffRadio; //Shared Memory Pointer
 bool  * mem_inChildCode; //Shared Memory Pointer
 
-/*void executeCommand(char * exec) {
-        char cmd[1000] = "sudo -u pi /usr/bin/vlc -Idummy ";
-        strcat(cmd, exec);
-        FILE *in;
-        char buff[1024];
+int myLog (int level, const char *format, ...)
+{
+    va_list args;
+    va_start (args, format);
+    if (runAsDaemon)
+    {
+        vsyslog(level, format, args);
+    }   
+    else
+    {
+        if (level == LOG_DEBUG) printf("[LOG_DEBUG] ");
+        else if (level == LOG_INFO) printf("[LOG_INFO] ");
+ 
+        vprintf(format, args);
+    }
+    va_end(args);
+}
 
-        if (!(in = popen(cmd, "r"))) {
-                exit(1);
-        }
 
-        while (fgets(buff, sizeof(buff), in) != NULL) {
-                printf("%s\n",buff);
-        }
-        pclose(in);
 
-}*/
 
 
 void readRadioList(char * filename){
@@ -118,11 +89,8 @@ void readRadioList(char * filename){
 
 
 void executeCommand(char * exec) {
-        //char cmd[1000] = "sudo -u pi /usr/bin/vlc -Idummy ";
-        //strcat(cmd, exec);
-        printf("About to execute %s\n", exec);
+        myLog(LOG_DEBUG, "About to execute %s\n", exec);
         execl("/usr/bin/sudo", "sudo", "-u", "pi", "/usr/bin/vlc", "-Idummy", exec, (char*)0);
-        //execl("/usr/bin/vlc", "vlc", "-Idummy", exec);
         perror("execl() failure!\n\n");
 }
 
@@ -143,19 +111,19 @@ void childCode(void){
         delay(1000);
     }
 
-    printf("I go out of the delay\n The childpid is %d\n",childpid);
-    printf("radioCounter = %d\n", radioCounter);
-    printf("numberOfRadio = %d\n", numberOfRadio);
+    myLog(LOG_DEBUG, "I go out of the delay\n The childpid is %d\n",childpid);
+    myLog(LOG_DEBUG, "radioCounter = %d\n", radioCounter);
+    myLog(LOG_DEBUG, "numberOfRadio = %d\n", numberOfRadio);
 
     *mem_inChildCode = true;
     *mem_changeRadio = false;
 
     if (childpid){
-        printf("There is a child to kill %d\n",childpid);
+        myLog(LOG_DEBUG, "There is a child to kill %d\n",childpid);
         kill(childpid, SIGTERM);
         childpid = 0;
     } else {
-        printf("There is no child to kill\n");
+        myLog(LOG_DEBUG, "There is no child to kill\n");
     }
 
     if (*mem_turnOffRadio){
@@ -164,7 +132,7 @@ void childCode(void){
     }
 
     if (radioCounter == numberOfRadio){
-        printf("End of list, back to the beginning\n");
+        myLog(LOG_DEBUG, "End of list, back to the beginning\n");
         radioCounter = 0 ;
     } else {
         childpid = fork();
@@ -173,14 +141,12 @@ void childCode(void){
         {
             if (childpid == 0) /* fork() returns 0 to the child process */
             {
-                printf("CHILD: I am the child process!\n");
-                printf("CHILD: Here's my PID: %d\n", getpid());
-                printf("CHILD: My parent's PID is: %d\n", getppid());
+                myLog(LOG_DEBUG, "CHILD: I am the child process!\n");
+                myLog(LOG_DEBUG, "CHILD: Here's my PID: %d\n", getpid());
+                myLog(LOG_DEBUG, "CHILD: My parent's PID is: %d\n", getppid());
                 int radioChanel = radioCounter;
-                printf("Radio chanel : %s\n", radioList[radioChanel]);
+                myLog(LOG_INFO, "Radio chanel : %s\n", radioList[radioChanel]);
                 executeCommand(radioList[radioChanel]);
-                //exit(0);
-                //executeCommand("sudo -u pi /usr/bin/vlc -Idummy http://stream.funradio.sk:8000/fun128.mp3.m3u");
             } else {
                radioCounter++;
             }
@@ -193,12 +159,12 @@ void childCode(void){
      
     }
     *mem_inChildCode = false;
-    printf("At the end radioCounter : %d\n",radioCounter);
+    myLog(LOG_DEBUG, "At the end radioCounter : %d\n",radioCounter);
   }
 }
 
 void changeRadio(bool off){
-    printf("I get the interrupt %d\n", getpid());
+    myLog(LOG_INFO, "I get the interrupt %d\n", getpid());
     if (!(*mem_inChildCode)){
         if (off){
           *mem_turnOffRadio = true;
@@ -207,12 +173,12 @@ void changeRadio(bool off){
         
     }
     else
-        printf("wait, I am in childCode\n");
+        myLog(LOG_DEBUG, "wait, I am in childCode\n");
 }
 
 void myInterrupt (void)
 {
-  printf("I am now in the interrupt\n");
+  myLog(LOG_INFO, "I am now in the interrupt\n");
   int buttonUp;
   delay(200);
   buttonUp  = digitalRead(8);
@@ -220,21 +186,21 @@ void myInterrupt (void)
     delay(800);
     buttonUp  = digitalRead(8);
     if (buttonUp){
-      printf("We want to change radio\n");
+      myLog(LOG_INFO, "We want to change radio\n");
       changeRadio(false);
     } else {
       delay(500);
       buttonUp = digitalRead(8);
       if(buttonUp){
-        printf("Just a long push? lets change radio...\n");
+        myLog(LOG_INFO, "Just a long push? lets change radio...\n");
         changeRadio(false);
       } else {
-        printf("We want to shut it off\n");
+        myLog(LOG_INFO, "We want to shut it off\n");
         changeRadio(true);
       }
     }
   } else {
-    printf("Too short. Was a glitch\n");
+    myLog(LOG_INFO, "Too short. Was a glitch\n");
   }
 }
 
@@ -291,6 +257,7 @@ void usage(){
     printf("This program is made to react to the GPIO input and stream webradio using vlc\n");
     printf("Options : \n");
     printf("\t-d : run as a daemon\n");
+    printf("\t-v : verbose output\n");
     printf("\t-f [filename] : file from which to read the list of radio\n");
 }
 
@@ -303,16 +270,16 @@ void usage(){
 int main (int argc, char ** argv)
 {
 
-  int runAsDaemon = false;
   char * radioListFile = NULL;
   int index, c; 
+
 
 
   while ((c = getopt (argc, argv, "df:")) != -1){
     switch (c)
        {
        case 'd':
-         runAsDaemon = true;
+         runAsDaemon = 1;
          break;
        case 'f':
          radioListFile = (char *)malloc(sizeof(char)*(strlen(optarg)+1));
@@ -339,8 +306,11 @@ int main (int argc, char ** argv)
       usage();
       exit(1);
   }
-  printf("radioListFile : %s\n", radioListFile);
-  printf("runAsDaemon : %d\n", runAsDaemon);
+
+
+  myLog(LOG_INFO, "Starting piRadio");
+  myLog(LOG_INFO, "radioListFile : %s\n", radioListFile);
+  myLog(LOG_INFO, "runAsDaemon : %d\n", runAsDaemon);
 
 
   if (wiringPiSetup () < 0)
@@ -367,10 +337,10 @@ int main (int argc, char ** argv)
   pid_t pid = fork();  
   
   if (pid == 0) {  
-     printf ("Je suis le fils !\n");  
+     myLog(LOG_INFO, "Je suis le fils !\n");  
      childCode(); 
   } else {  
-     printf ("Je suis le père !\n");  
+     myLog(LOG_INFO, "Je suis le père !\n");  
     if (wiringPiISR (8, INT_EDGE_FALLING, &myInterrupt) < 0)
     {
       fprintf (stderr, "Unable to setup ISR: %s\n", strerror (errno)) ;
